@@ -1,0 +1,154 @@
+from __future__ import print_function
+import argparse
+import os
+import random
+import torch
+import torch.nn as nn
+import torch.nn.parallel
+import torch.backends.cudnn as cudnn
+import torch.optim as optim
+import torch.utils.data
+from torch.autograd import Variable
+import torch.nn.functional as F
+import numpy as np
+import time
+import math
+#from dataloader import listflowfile as lt
+from dataloader import KITTILoader as DA
+from dataloader import KITTIloader2015 as ls
+from models import *
+
+parser = argparse.ArgumentParser(description='TNET')
+parser.add_argument('--KITTI', default='2015',
+                    help='KITTI version')
+parser.add_argument('--max_disp', type=int ,default=64,
+                    help='maxium disparity')
+parser.add_argument('--model', default='stackhourglass',
+                    help='select model')
+parser.add_argument('--datapath', default='/home/zhu-ty/hdd/datasets/KITTI/training/',
+                    help='datapath')
+parser.add_argument('--epochs', type=int, default=10,
+                    help='number of epochs to train')
+parser.add_argument('--loadmodel', default= None,
+                    help='load model')
+parser.add_argument('--savemodel', default='./',
+                    help='save model')
+parser.add_argument('--no-cuda', action='store_true', default=False,
+                    help='enables CUDA training')
+parser.add_argument('--seed', type=int, default=1, metavar='S',
+                    help='random seed (default: 1)')
+args = parser.parse_args()
+args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+# set gpu id used
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+if args.KITTI == '2015':
+    from dataloader import KITTIloader2015 as ls
+else:
+    from dataloader import KITTIloader2012 as ls  
+
+torch.manual_seed(args.seed)
+if args.cuda:
+    torch.cuda.manual_seed(args.seed)
+
+all_left, all_right, all_gt, test_left, test_right, test_gt = ls.dataloader(args.datapath)
+
+Trainleftoader = torch.utils.data.DataLoader(
+            DA.myImageFloder(all_left,all_right,all_gt, True), 
+            batch_size= 12, shuffle= True, num_workers= 8, drop_last=False)
+
+Testleftoader = torch.utils.data.DataLoader(
+            DA.myImageFloder(all_left,all_right,all_gt, False), 
+            batch_size= 8, shuffle= False, num_workers= 4, drop_last=False)
+
+
+# if args.model == 'stackhourglass':
+#     model = stackhourglass(args.maxdisp)
+# elif args.model == 'basic':
+#     model = basic(args.maxdisp)
+# else:
+#     print('no model')
+model = testnet(args.max_disp)
+
+if args.cuda:
+    #model = nn.DataParallel(model)
+    model.cuda()
+
+if args.loadmodel is not None:
+    state_dict = torch.load(args.loadmodel)
+    model.load_state_dict(state_dict['state_dict'])
+
+print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
+
+optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
+
+def train(left,right,gt):
+        model.train()
+        left   = Variable(torch.FloatTensor(left))
+        right   = Variable(torch.FloatTensor(right))   
+        gt = Variable(torch.FloatTensor(gt))
+
+        if args.cuda:
+            left, right, gt = left.cuda(), right.cuda(), gt.cuda()
+
+        #---------
+        mask = gt < args.max_disp
+        mask.detach_()
+        #----
+        optimizer.zero_grad()
+
+        output = model(left,right)
+        output = torch.squeeze(output,1)
+        loss = F.smooth_l1_loss(output[mask], gt[mask], size_average=True)
+
+        loss.backward()
+        optimizer.step()
+
+        return loss.data
+
+def test(left,right,gt):
+        model.eval()
+        left   = Variable(torch.FloatTensor(left))
+        right   = Variable(torch.FloatTensor(right))   
+        if args.cuda:
+            left, right = left.cuda(), right.cuda()
+
+        #---------
+        mask = gt < 192
+        #----
+
+        with torch.no_grad():
+            output3 = model(left,right)
+
+        output = torch.squeeze(output3.data.cpu(),1)[:,4:,:]
+
+        if len(gt[mask])==0:
+            loss = 0
+        else:
+            loss = torch.mean(torch.abs(output[mask]-gt[mask]))  # end-point-error
+
+        return loss
+
+def adjust_learning_rate(optimizer, epoch):
+    right = 0.001
+    print(right)
+    for param_group in optimizer.param_groups:
+        param_group['right'] = right
+
+def main():
+    start_full_time = time.time()
+    for epoch in range(1, args.epochs+1):
+        print('This is %d-th epoch'%(epoch))
+        total_test_loss = 0
+        adjust_learning_rate(optimizer,epoch)
+
+        for batch_idx,(left,right,gt) in enumerate(Trainleftoader):
+            start_time = time.time()
+            loss = train(left,right,gt)
+            print('Iter %d training loss = %.3f,time=%.2f'%(batch_idx,loss,time.time()-start_time))
+    print('full training time = %.2f hr'%((time.time() - start_full_time)/3600))
+
+if __name__ == '__main__':
+    main()
+    

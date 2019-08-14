@@ -15,20 +15,18 @@ from .submodule import *
 #feature1 = 64 H/4
 #feature0 = 64 H/2
 #################
-m = 16 # 16 or 32
-residual_blocks=False #True or False
-block_reps = 1 #Conv block repetition factor: 1 or 2
+
 class SCSMnet(nn.Module):
     
     def __init__(self, max_disp):
         super(SCSMnet, self).__init__()
         self.max_disp = max_disp
         #self.train_stage = train_stage
-        layer = [1,1,1,1]
+        layer = [2,3,3,2]
         self.feature_extraction = feature_extraction(layer)
-        self.decoder_16 = decoderBlock_dense(3,32,16)
-        self.decoder_8 = decoderBlock_dense(3,32+8,16)
-        self.decoder_4 = decoderBlock_dense(3,32+8,16,up=False)
+        self.decoder_16 = decoderBlock_dense(5,32,16)
+        self.decoder_8 = decoderBlock_dense(5,32+8,16)
+        self.decoder_4 = decoderBlock_dense(5,32+8,16,up=False)
         self.decoder_2 = decoderBlock_dense(3,32,16,up=False)
         self.disp_reg_2 = disparityregression(16)
         self.disp_reg_4 = disparityregression(self.max_disp//4)

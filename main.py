@@ -22,7 +22,7 @@ from models.submodule import scale_pyramid
 parser = argparse.ArgumentParser(description='TNET')
 parser.add_argument('--KITTI', default='2015',
                     help='KITTI version')
-parser.add_argument('--max_disp', type=int ,default=64,
+parser.add_argument('--max_disp', type=int ,default=192,
                     help='maxium disparity')
 parser.add_argument('--model', default='stackhourglass',
                     help='select model')
@@ -104,7 +104,8 @@ def train(left,right,gt):
 
         output = model(left,right)
         output = [torch.squeeze(o,1) for o in output]
-        loss = [F.smooth_l1_loss(output[i]*mask[i], gt_pyramid[i]*mask[i], size_average=True) for i in range(5)]
+        weight = [1,1,0.8,0.7,0.7]
+        loss = [weight[i]*F.smooth_l1_loss(output[i]*mask[i], gt_pyramid[i]*mask[i], size_average=True) for i in range(5)]
         loss = sum(loss)
 
         loss.backward()
@@ -136,10 +137,10 @@ def test(left,right,gt):
         return loss
 
 def adjust_learning_rate(optimizer, epoch):
-    right = 0.001
-    print(right)
+    lr = 1e-3
+    print(lr)
     for param_group in optimizer.param_groups:
-        param_group['right'] = right
+        param_group['lr'] = lr
 
 def main():
     start_full_time = time.time()

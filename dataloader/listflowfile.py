@@ -19,8 +19,8 @@ def dataloader(filepath):
  image = [img for img in classes if img.find('frames_cleanpass') > -1]
  disp  = [dsp for dsp in classes if dsp.find('disparity') > -1]
 
- monkaa_path = filepath + [x for x in image if 'monkaa' in x][0]
- monkaa_disp = filepath + [x for x in disp if 'monkaa' in x][0]
+ monkaa_path = filepath + [x for x in image if 'monkaa' in x][0] + '/frames_cleanpass'
+ monkaa_disp = filepath + [x for x in disp if 'monkaa' in x][0] + '/disparity'
 
  
  monkaa_dir  = os.listdir(monkaa_path)
@@ -43,8 +43,8 @@ def dataloader(filepath):
     if is_image_file(monkaa_path+'/'+dd+'/right/'+im):
      all_right_img.append(monkaa_path+'/'+dd+'/right/'+im)
 
- flying_path = filepath + [x for x in image if x == 'frames_cleanpass'][0]
- flying_disp = filepath + [x for x in disp if x == 'frames_disparity'][0]
+ flying_path = filepath + [x for x in image if x == 'frames_cleanpass'][0] + '/frames_cleanpass'
+ flying_disp = filepath + [x for x in disp if x == 'frames_disparity'][0] + '/disparity'
  flying_dir = flying_path+'/TRAIN/'
  subdir = ['A','B','C']
 
@@ -82,8 +82,8 @@ def dataloader(filepath):
 
 
 
- driving_dir = filepath + [x for x in image if 'driving' in x][0] + '/'
- driving_disp = filepath + [x for x in disp if 'driving' in x][0]
+ driving_dir = filepath + [x for x in image if 'driving' in x][0] + '/frames_cleanpass/'
+ driving_disp = filepath + [x for x in disp if 'driving' in x][0] + '/disparity'
 
  subdir1 = ['35mm_focallength','15mm_focallength']
  subdir2 = ['scene_backwards','scene_forwards']

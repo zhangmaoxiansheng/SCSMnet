@@ -5,9 +5,9 @@ import torch
 import torchvision.transforms as transforms
 import random
 from PIL import Image, ImageOps
-import preprocess 
-import listflowfile as lt
-import readpfm as rp
+from utils import preprocess 
+from . import listflowfile as lt
+from . import readpfm as rp
 import numpy as np
 
 IMG_EXTENSIONS = [

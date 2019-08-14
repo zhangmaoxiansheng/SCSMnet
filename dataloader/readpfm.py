@@ -13,6 +13,8 @@ def readPFM(file):
     endian = None
 
     header = file.readline().rstrip()
+    if (sys.version[0]) == '3':
+        header = header.decode('utf-8')
     if header == 'PF':
         color = True
     elif header == 'Pf':
@@ -20,13 +22,20 @@ def readPFM(file):
     else:
         raise Exception('Not a PFM file.')
 
-    dim_match = re.match(r'^(\d+)\s(\d+)\s$', file.readline())
+    if (sys.version[0]) == '3':
+        dim_match = re.match(r'^(\d+)\s(\d+)\s$', file.readline().decode('utf-8'))
+    else:
+        dim_match = re.match(r'^(\d+)\s(\d+)\s$', file.readline())
     if dim_match:
         width, height = map(int, dim_match.groups())
     else:
         raise Exception('Malformed PFM header.')
 
-    scale = float(file.readline().rstrip())
+    if (sys.version[0]) == '3':
+        scale = float(file.readline().rstrip().decode('utf-8'))
+    else:
+        scale = float(file.readline().rstrip())
+        
     if scale < 0: # little-endian
         endian = '<'
         scale = -scale

@@ -13,10 +13,11 @@ import torch.nn.functional as F
 import numpy as np
 import time
 import math
-#from dataloader import listflowfile as lt
-from dataloader import KITTILoader as DA
-from dataloader import KITTIloader2015 as ls
+from dataloader import listflowfile as lt
+from dataloader import SecenFlowLoader as DA
+#from dataloader import KITTIloader2015 as ls
 from models import *
+from models.submodule import scale_pyramid
 
 parser = argparse.ArgumentParser(description='TNET')
 parser.add_argument('--KITTI', default='2015',
@@ -25,7 +26,7 @@ parser.add_argument('--max_disp', type=int ,default=64,
                     help='maxium disparity')
 parser.add_argument('--model', default='stackhourglass',
                     help='select model')
-parser.add_argument('--datapath', default='/home/zhu-ty/hdd/datasets/KITTI/training/',
+parser.add_argument('--datapath', default='/home/jianing/hdd/sceneflow/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=10,
                     help='number of epochs to train')
@@ -41,18 +42,18 @@ args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 # set gpu id used
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
-if args.KITTI == '2015':
-    from dataloader import KITTIloader2015 as ls
-else:
-    from dataloader import KITTIloader2012 as ls  
+# if args.KITTI == '2015':
+#     from dataloader import KITTIloader2015 as ls
+# else:
+#     from dataloader import KITTIloader2012 as ls  
 
 torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
-all_left, all_right, all_gt, test_left, test_right, test_gt = ls.dataloader(args.datapath)
+all_left, all_right, all_gt, test_left, test_right, test_gt = lt.dataloader(args.datapath)
 
 Trainleftoader = torch.utils.data.DataLoader(
             DA.myImageFloder(all_left,all_right,all_gt, True), 
@@ -69,10 +70,10 @@ Testleftoader = torch.utils.data.DataLoader(
 #     model = basic(args.maxdisp)
 # else:
 #     print('no model')
-model = testnet(args.max_disp)
+model = wnet(args.max_disp)
 
 if args.cuda:
-    #model = nn.DataParallel(model)
+    model = nn.DataParallel(model)
     model.cuda()
 
 if args.loadmodel is not None:
@@ -93,14 +94,18 @@ def train(left,right,gt):
             left, right, gt = left.cuda(), right.cuda(), gt.cuda()
 
         #---------
-        mask = gt < args.max_disp
-        mask.detach_()
+        
+        gt_pyramid = scale_pyramid(gt)
+        mask = [g < args.max_disp for g in gt_pyramid]
+        mask = [m.float().detach_() for m in mask]
+        #mask.detach_()
         #----
         optimizer.zero_grad()
 
         output = model(left,right)
-        output = torch.squeeze(output,1)
-        loss = F.smooth_l1_loss(output[mask], gt[mask], size_average=True)
+        output = [torch.squeeze(o,1) for o in output]
+        loss = [F.smooth_l1_loss(output[i]*mask[i], gt_pyramid[i]*mask[i], size_average=True) for i in range(5)]
+        loss = sum(loss)
 
         loss.backward()
         optimizer.step()

@@ -28,10 +28,10 @@ class SCSMnet(nn.Module):
         self.decoder_8 = decoderBlock_dense(5,32+8,16)
         self.decoder_4 = decoderBlock_dense(5,32+8,16,up=False)
         self.decoder_2 = decoderBlock_dense(3,32,16,up=False)
-        self.disp_reg_2 = disparityregression(16)
-        self.disp_reg_4 = disparityregression(self.max_disp//4)
-        self.disp_reg_8 = disparityregression(self.max_disp//8)
-        self.disp_reg_16 = disparityregression(self.max_disp//16)
+        self.disp_reg_2 = disparityregression(32,2)
+        self.disp_reg_4 = disparityregression(self.max_disp//4,4)
+        self.disp_reg_8 = disparityregression(self.max_disp//8,8)
+        self.disp_reg_16 = disparityregression(self.max_disp//16,16)
     
     def cost_volume(self, refimg_fea, targetimg_fea, maxdisp, leftview=True):
         '''
@@ -49,14 +49,14 @@ class SCSMnet(nn.Module):
             feata = refimg_fea[:,:,:,i:width]
             featb = targetimg_fea[:,:,:,:width-i]
             diff = torch.abs(feata - featb)
-            mask = full_mask[:,:,:,i:width] - torch.abs(feata - featb)
-            mask = torch.clamp(mask,0,5)
-            fullcost = feata * featb
+            #mask = full_mask[:,:,:,i:width] - diff
+            #mask = torch.clamp(mask,0,5)
+            #fullcost = feata * featb
             # concat
             if leftview:
-                cost[:, :refimg_fea.size()[1], i, :,i:] = fullcost * mask
+                cost[:, :refimg_fea.size()[1], i, :,i:] = diff
             else:
-                cost[:, :refimg_fea.size()[1], i, :,:width-i] = fullcost * mask
+                cost[:, :refimg_fea.size()[1], i, :,:width-i] = diff
         cost = cost.contiguous()
 
         return cost
@@ -83,21 +83,14 @@ class SCSMnet(nn.Module):
         
         left_features_warp = warp(left_features[0],disp_4U)
         #print('total gpu memory %f M'%(Gpu_Memory(0)+Gpu_Memory(1)+Gpu_Memory(2)+Gpu_Memory(3)))
-        cost_volume_2 = self.cost_volume(left_features_warp, right_features[0],16)
-        _,cost_2 = self.decoder_2(cost_volume_2)
+        cost_volume_2 = self.cost_volume(left_features_warp, right_features[0],32)
+        _,cost_2 = self.decoder_2(cost_volume_2)#16*H*W
         disp_2 = self.disp_reg_2(F.softmax(cost_2,1))
         disp_2 = disp_2 + disp_4U
-        disp_1 = F.interpolate(disp_2,[left.size()[2],left.size()[3]],mode='bilinear')
-        #however cost2 is too dense, so warping is needed
-
-        # print(lr.size())
-        # cost_volume = self.cost_volume(left_features, right_features, self.max_disp)#N*64*max_disp*H*W
-        # cost_aggregation = self.sparseModel(cost_volume)
-        # print(cost_aggregation.size())
-        # cost_aggregation = F.interpolate(cost_aggregation, [self.disp_reg.disp.shape[1], left.size()[2],left.size()[3]], mode='trilinear').squeeze(1)
-        # print(cost_aggregation.size())
-        # entrop = F.softmax(cost_aggregation,1)
-        # print(entrop.size())
-        # pred = self.disp_reg(entrop)
+        #disp_1 = F.interpolate(disp_2,[left.size()[2],left.size()[3]],mode='bilinear')
         
-        return disp_1,disp_2,disp_4,disp_8,disp_16
+        disp_16 = F.interpolate(disp_16,[left.size()[2],left.size()[3]],mode='bilinear')
+        disp_8 = F.interpolate(disp_8,[left.size()[2],left.size()[3]],mode='bilinear')
+        disp_4 = F.interpolate(disp_4,[left.size()[2],left.size()[3]],mode='bilinear')
+        disp_2 = F.interpolate(disp_4,[left.size()[2],left.size()[3]],mode='bilinear')
+        return disp_2,disp_4,disp_8,disp_16

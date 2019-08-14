@@ -42,7 +42,7 @@ args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 # set gpu id used
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
 # if args.KITTI == '2015':
 #     from dataloader import KITTIloader2015 as ls
@@ -82,7 +82,7 @@ if args.loadmodel is not None:
 
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
-optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
+optimizer = optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.999))
 
 def train(left,right,gt):
         model.train()
@@ -95,17 +95,20 @@ def train(left,right,gt):
 
         #---------
         
-        gt_pyramid = scale_pyramid(gt)
-        mask = [g < args.max_disp for g in gt_pyramid]
-        mask = [m.float().detach_() for m in mask]
-        #mask.detach_()
+        #gt_pyramid = scale_pyramid(gt)
+        #mask = [g < args.max_disp for g in gt_pyramid]
+        #mask = [m.float().detach_() for m in mask]
+        mask = gt < args.max_disp
+        mask = mask.float()
+        mask.detach_()
         #----
         optimizer.zero_grad()
 
         output = model(left,right)
         output = [torch.squeeze(o,1) for o in output]
-        weight = [1,1,0.8,0.7,0.7]
-        loss = [weight[i]*F.smooth_l1_loss(output[i]*mask[i], gt_pyramid[i]*mask[i], size_average=True) for i in range(5)]
+        weight = [1,1,1,0.8]
+        loss = [weight[i]*F.smooth_l1_loss(output[i]*mask, gt*mask, size_average=True) for i in range(4)]
+        print("first loss %f, second loss %f, third loss %f, fourth loss %f"%(loss[0],loss[1],loss[2],loss[3]))
         loss = sum(loss)
 
         loss.backward()

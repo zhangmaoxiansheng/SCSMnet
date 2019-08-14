@@ -431,16 +431,16 @@ def scale_pyramid(img, num_scale = 5):
     return scaled_imgs
 
 class disparityregression(nn.Module):
-    def __init__(self, maxdisp):
+    def __init__(self, maxdisp,div):
         super(disparityregression, self).__init__()
         #self.disp = Variable(torch.Tensor(np.reshape(np.array(range(maxdisp)),[1,maxdisp,1,1])).cuda(), requires_grad=False)
         self.register_buffer('disp',torch.Tensor(np.reshape(np.array(range(maxdisp)),[1,maxdisp,1,1])))
-
+        self.div = div
     def forward(self, x):
         disp = self.disp.repeat(x.size()[0],1,x.size()[2],x.size()[3])
         #print(disp.size())
         #print(x.size())
-        out = torch.sum(x*disp,1)
+        out = torch.sum(x*disp,1) * self.div
         out = out.unsqueeze(1)
         return out
 

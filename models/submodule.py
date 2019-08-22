@@ -55,7 +55,7 @@ class conv2DBatchNorm(nn.Module):
         return outputs
 
 def conv3x3(in_channel, out_channel, stride = 1):
-    return nn.Conv2d(in_channel, out_channel, kernal_size = 3, stride = stride, padding = 1, bias = False)
+    return nn.Conv2d(in_channel, out_channel, kernel_size = 3, stride = stride, padding = 1, bias = False)
 
 def convbn_3d(in_channel, out_channel, kernel_size, stride, pad):
 
@@ -346,7 +346,7 @@ class decoderBlock_dense(nn.Module):
         #stride = [stride]*nstride + [(1,1,1)] * (nconvs-nstride)#2*[(1,1,1)]=[(1,1,1),(1,1,1)]
         self.convs = [Conv3dBlock_dense(inchannelF,channelF,stride=stride)]
         for i in range(1,nconvs):
-            self.convs.append(Conv3dBlock_dense(channelF,channelF, stride=stride))#actually the stride is the same....
+            self.convs.append(Conv3dBlock_dense(channelF,channelF,3,stride=stride,pad=1))#actually the stride is the same....
         self.convs = nn.Sequential(*self.convs)
 
         self.classify = nn.Sequential(Conv3d(channelF, channelF, 3, (1,1,1), 1),
@@ -361,8 +361,8 @@ class decoderBlock_dense(nn.Module):
                                  nn.ReLU(inplace=True))
 
         if pool:
-            self.pool_convs = torch.nn.ModuleList([Conv3d(channelF, channelF, 1, (1,1,1), 0),
-                               Conv3d(channelF, channelF, 1, (1,1,1), 0),
+            self.pool_convs = torch.nn.ModuleList([Conv3d(channelF, channelF, 3, (1,1,1), 1),
+                               Conv3d(channelF, channelF, 3, (1,1,1), 1),
                                Conv3d(channelF, channelF, 1, (1,1,1), 0),
                                Conv3d(channelF, channelF, 1, (1,1,1), 0)])
 
@@ -421,12 +421,11 @@ class upconv(nn.Module):
         return x
 
 
-def scale_pyramid(img, num_scale = 5):   
-    
-    scaled_imgs = [img.squeeze(1)]
+def scale_pyramid(img, num_scale = 4):   
+    scaled_imgs = [img]
     #print(shape)
     for i in range(num_scale - 1):
-        scaled_imgs.append(F.interpolate(img.unsqueeze(1),scale_factor=0.5**(i+1),mode='bilinear').squeeze(1))
+        scaled_imgs.append(F.interpolate(img,scale_factor=0.5**(i+1),mode='bilinear'))
 
     return scaled_imgs
 
@@ -440,9 +439,10 @@ class disparityregression(nn.Module):
         disp = self.disp.repeat(x.size()[0],1,x.size()[2],x.size()[3])
         #print(disp.size())
         #print(x.size())
+        out_vol = x*disp*self.div
         out = torch.sum(x*disp,1) * self.div
         out = out.unsqueeze(1)
-        return out
+        return out,out_vol
 
 def Gpu_Memory(device=None):
     return torch.cuda.memory_allocated(device=device)/1000/1000
@@ -496,3 +496,109 @@ def warp(x, disp):
         output = nn.functional.grid_sample(x, vgrid)
         
         return output
+
+
+class Warping_res(nn.Module):
+    def __init__(self,inchannelF,inDchannelF,feat_inchannelF,channelF):
+        super(Warping_res,self).__init__()
+        self.convs = nn.Sequential(
+                        Conv3dBlock_dense(inDchannelF,channelF,kernel_size=3,stride=1,pad=1),
+                        Conv3dBlock_dense(channelF,channelF,kernel_size=3,stride=1,pad=1),
+                        Conv3dBlock_dense(channelF,channelF,kernel_size=1,stride=1,pad=0),
+                        Conv3dBlock_dense(channelF,channelF,kernel_size=1,stride=1,pad=0),
+                        #Conv3dBlock_dense(channelF,channelF,kernel_size=1,stride=1),
+                        #Conv3dBlock_dense(channelF,channelF,kernel_size=1,stride=1),
+                        Conv3d(channelF, channelF, 3, (1,1,1), 1),
+                        nn.ReLU(inplace=True),
+                        Conv3d(channelF, 1, 3, (1,1,1),1,bias=True))
+        
+        self.trans = False
+        if(feat_inchannelF != channelF):
+            self.trans = True
+        self.trans1 = conv3x3(feat_inchannelF,channelF)
+        self.trans2 = conv3x3(channelF + inchannelF,channelF)#TODO!!!!!!!!!!!!
+        self.dilation_conv = nn.Sequential(
+                            conv2DBatchNorm(channelF,channelF,3,1,1),
+                            conv2DBatchNorm(channelF,channelF,3,1,padding=2,dilation=2),
+                            conv2DBatchNorm(channelF,channelF,3,1,padding=4,dilation=4),
+                            conv2DBatchNorm(channelF,channelF,3,1,padding=8,dilation=8),
+                            conv2DBatchNorm(channelF,channelF,3,1,padding=4,dilation=4),
+                            conv2DBatchNorm(channelF,channelF,3,1,padding=2,dilation=2),
+                            conv2DBatchNorm(channelF,channelF//2,3,1,1),
+                            conv2DBatchNorm(channelF//2,channelF//2,3,1,1),
+                            conv2DBatchNorm(channelF//2,1,3,1,1)
+                            )
+    def forward(self,x,img_feat):
+        x = x.permute(0,2,1,3,4)
+        x = self.convs(x)
+        
+        if self.trans:
+            img_feat = self.trans1(img_feat)
+        output = self.trans2(torch.cat((img_feat,x.squeeze(1)),1))
+        output = self.dilation_conv(output)
+        return output
+def decompose_disp(disp,div,max_disp):
+    _,H,W = disp.size()
+    disp = disp.unsqueeze(1)
+    disp = disp/div
+    disp = F.interpolate(disp,[H//div,W//div])
+    volume = Variable(torch.cuda.FloatTensor(disp.size()[0], max_disp,disp.size()[2],disp.size()[3]).fill_(0.))
+    
+    for i in range(1,max_disp):
+        mask = disp <= (i)
+        mask = mask.float()
+        mask2 = disp > i-1
+        mask2 = mask2.float()
+        v_ = disp*mask*mask2
+        volume[:,i,:,:] = v_.squeeze(1)
+    
+    return volume
+
+def decompose_disp_pro(disp,div,max_disp):
+    _,H,W = disp.size()
+    disp = disp.unsqueeze(1)
+    disp = disp/div
+    disp = F.interpolate(disp,[H//div,W//div])
+    volume = Variable(torch.cuda.FloatTensor(disp.size()[0], max_disp,disp.size()[2],disp.size()[3]).fill_(0.))
+    
+    for i in range(0,max_disp):
+        mask = disp <= (i)
+        mask = mask.float()
+        mask2 = disp > i-1
+        mask2 = mask2.float()
+        if i == 0:
+            pro = mask*mask2
+            volume[:,i,:,:] = pro.squeeze(1)
+        else:
+            v_ = disp*mask*mask2
+            pro1 = v_ - (i-1)
+            pro2 = 1 - pro1
+            volume[:,i,:,:] = pro1.squeeze(1)
+            volume[:,i-1,:,:] += pro2.squeeze(1)
+    return volume
+def sparse_test(x):
+    return (len(torch.nonzero(x))/x.nelement())
+
+class cost_volume_refine(nn.Module):
+    def __init__(self):
+        
+        super(cost_volume_refine,self).__init__()
+        # self.convs = torch.nn.ModuleList([])
+        # for i in range(self.depth):
+        #     self.convs.append(nn.Sequential(conv2DBatchNorm(1,8,3,1,1),
+        #                     conv2DBatchNorm(8,16,3,1,padding=2,dilation=2),
+        #                     conv2DBatchNorm(16,32,3,1,padding=4,dilation=4),
+        #                     conv2DBatchNorm(32,16,3,1,padding=4,dilation=4),
+        #                     conv2DBatchNorm(16,8,3,1,padding=2,dilation=2),
+        #                     conv2DBatchNorm(8,1,3,1,1)
+        #             ))
+        
+    def forward(self,x):
+        # for i in range(self.depth):
+        #     temp = self.convs[i](x[:,i,:,:].unsqueeze(1))
+        #     x[:,i,:,:] = temp.squeeze(1)
+        x = F.softmax(x,1)
+        # x = torch.clamp(x,0.2,1)
+        # x = F.softmax(x,1)
+
+        return x
